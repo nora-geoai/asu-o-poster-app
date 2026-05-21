@@ -1,5 +1,5 @@
 """
-プロジェクト「明日を」 - ポスター現地調査専用アプリ（合言葉ロック付き完全版）
+ポスター現地調査専用アプリ（レイヤ切り替え機能付き完全版）
 Streamlit + Folium + Supabase
 """
 
@@ -15,7 +15,6 @@ import os
 # ============================================================
 st.set_page_config(page_title="ポスター調査マップ", page_icon="📍", layout="wide")
 
-# 既存アプリ（app_v3r03.py）の美しいCSSデザインを継承！
 st.markdown("""
 <style>
   .login-box {
@@ -26,7 +25,6 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# セッションの初期化（ログイン状態の管理）
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
 
@@ -40,7 +38,6 @@ if not st.session_state["authenticated"]:
     password = st.text_input("合言葉を入力してください", type="password")
     
     if st.button("ログイン", type="primary"):
-        # secrets.toml に設定した合言葉と照合する
         if password == st.secrets.get("APP_PASSWORD", ""):
             st.session_state["authenticated"] = True
             st.rerun()
@@ -48,7 +45,7 @@ if not st.session_state["authenticated"]:
             st.error("合言葉が違います。")
             
     st.markdown("</div>", unsafe_allow_html=True)
-    st.stop() # 💡認証されるまではここで処理を止め、以下の地図やデータを一切読み込ませません
+    st.stop()
 
 # ============================================================
 # 以下、認証成功時のみ実行されるメイン処理
@@ -79,7 +76,8 @@ def fetch_poster_data():
         df = df.sort_values(by='poster_id')
     return df
 
-st.title("📍 プロジェクト「明日を」ポスター現地調査システム")
+# タイトルから「プロジェクト名」を外してスマートに変更
+st.title("📍 ポスター現地調査システム")
 st.caption("最新のデータベース（Supabase）とリアルタイムに同期しています。")
 
 with st.spinner("データを読み込んでいます..."):
@@ -114,7 +112,7 @@ if st.sidebar.button("ログアウト", type="secondary"):
     st.rerun()
 
 # ============================================================
-# 地図の描画 (Folium)
+# 地図の描画 (Folium + レイヤ切り替え)
 # ============================================================
 if not df_filtered.empty:
     center_lat = df_filtered['latitude'].mean()
@@ -123,7 +121,21 @@ else:
     center_lat = 35.0045
     center_lon = 135.9685
 
-m = folium.Map(location=[center_lat, center_lon], zoom_start=12)
+# レイヤを細かくコントロールするため、tiles=None で初期化
+m = folium.Map(location=[center_lat, center_lon], zoom_start=12, tiles=None)
+
+# 🌍 レイヤ1：通常の地図 (OpenStreetMap)
+folium.TileLayer('openstreetmap', name='通常地図').add_to(m)
+
+# 🗺️ レイヤ2：航空写真 (国土地理院 シームレス空中写真)
+folium.TileLayer(
+    tiles='https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg',
+    attr='国土地理院',
+    name='航空写真',
+    overlay=False,
+    control=True
+).add_to(m)
+
 color_map = {"承諾": "blue", "交渉中": "orange", "お断り": "red", "未交渉": "gray"}
 
 for _, row in df_filtered.iterrows():
@@ -141,14 +153,17 @@ for _, row in df_filtered.iterrows():
     folium.Marker(
         location=[row['latitude'], row['longitude']],
         popup=folium.Popup(popup_html, max_width=300),
-        tooltip=f"ID: {row['poster_id']} ({row['status']}) - {row['poster_condition']}",
+        tooltip=f"ID: {row['poster_id']} ({row['status']})",
         icon=folium.Icon(color=color_map.get(row['status'], 'gray'), icon="info-sign")
     ).add_to(m)
+
+# 🛠️ 地図の右上（または左上）にレイヤ切り替えスイッチを配置
+folium.LayerControl(position='topright', collapsed=False).add_to(m)
 
 st_folium(m, width="100%", height=550, returned_objects=[])
 
 # ============================================================
-# 現場からの即時更新機能（ステータス ＆ ポスター状況）
+# 現場からの即時更新機能
 # ============================================================
 st.markdown("---")
 st.subheader("📝 現場からデータを即時更新")
