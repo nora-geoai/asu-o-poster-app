@@ -1,5 +1,5 @@
 """
-ポスター現地調査専用アプリ（レイヤ切り替え機能付き完全版）
+ポスター現地調査専用アプリ（タップ連動・自動入力機能付き）
 Streamlit + Folium + Supabase
 """
 
@@ -9,6 +9,7 @@ import folium
 from streamlit_folium import st_folium
 from supabase import create_client, Client
 import os
+import re  # 正規表現を使ってIDを抽出するために追加
 
 # ============================================================
 # 初期設定
@@ -76,7 +77,6 @@ def fetch_poster_data():
         df = df.sort_values(by='poster_id')
     return df
 
-# タイトルから「プロジェクト名」を外してスマートに変更
 st.title("📍 ポスター現地調査システム")
 st.caption("最新のデータベース（Supabase）とリアルタイムに同期しています。")
 
@@ -121,13 +121,12 @@ else:
     center_lat = 35.0045
     center_lon = 135.9685
 
-# レイヤを細かくコントロールするため、tiles=None で初期化
 m = folium.Map(location=[center_lat, center_lon], zoom_start=12, tiles=None)
 
-# 🌍 レイヤ1：通常の地図 (OpenStreetMap)
+# レイヤ1：通常の地図
 folium.TileLayer('openstreetmap', name='通常地図').add_to(m)
 
-# 🗺️ レイヤ2：航空写真 (国土地理院 シームレス空中写真)
+# レイヤ2：航空写真
 folium.TileLayer(
     tiles='https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg',
     attr='国土地理院',
@@ -153,34 +152,60 @@ for _, row in df_filtered.iterrows():
     folium.Marker(
         location=[row['latitude'], row['longitude']],
         popup=folium.Popup(popup_html, max_width=300),
-        tooltip=f"ID: {row['poster_id']} ({row['status']})",
+        tooltip=f"ID: {row['poster_id']} ({row['status']}) - {row['poster_condition']}",
         icon=folium.Icon(color=color_map.get(row['status'], 'gray'), icon="info-sign")
     ).add_to(m)
 
-# 🛠️ 地図の右上（または左上）にレイヤ切り替えスイッチを配置
 folium.LayerControl(position='topright', collapsed=False).add_to(m)
 
-st_folium(m, width="100%", height=550, returned_objects=[])
+# 【変更点】地図の描画結果（クリック情報など）を変数 map_data に受け取る
+map_data = st_folium(m, width="100%", height=550, returned_objects=["last_object_clicked_tooltip"])
 
 # ============================================================
-# 現場からの即時更新機能
+# 地図クリック連動 ＆ 現場からの即時更新機能
 # ============================================================
 st.markdown("---")
 st.subheader("📝 現場からデータを即時更新")
+st.caption("地図上のピンをタップすると、そのIDと現在の状況が下の入力欄に自動でセットされます。")
 
+# クリックされたピンの情報を解析
+clicked_id = ""
+default_status_idx = 0
 condition_presets = ["良好", "色あせ", "破れ", "要貼り替え", "未記録"]
 all_conditions_for_input = condition_presets.copy()
 for c in all_conditions:
     if c not in all_conditions_for_input:
         all_conditions_for_input.append(c)
+default_cond_idx = all_conditions_for_input.index("未記録")
 
+if map_data and map_data.get("last_object_clicked_tooltip"):
+    tooltip_text = map_data["last_object_clicked_tooltip"]
+    # ツールチップの文字列（例: "ID: 草津市0001 (承諾)..."）からID部分を抽出
+    match = re.search(r'ID:\s*([^\s\(]+)', tooltip_text)
+    if match:
+        clicked_id = match.group(1)
+        
+        # 抽出したIDを元に、現在のステータスをデータベースから探して選択肢のデフォルトにする
+        matched_row = df_posters[df_posters['poster_id'] == clicked_id]
+        if not matched_row.empty:
+            current_status = matched_row.iloc[0]['status']
+            current_cond = matched_row.iloc[0]['poster_condition']
+            
+            if current_status in status_options:
+                default_status_idx = status_options.index(current_status)
+            if current_cond in all_conditions_for_input:
+                default_cond_idx = all_conditions_for_input.index(current_cond)
+
+# フォームの描画
 col1, col2, col3, col4 = st.columns([1.2, 1, 1, 1])
+
 with col1:
-    target_id = st.text_input("対象ID (例: 草津市0001)", placeholder="草津市0001")
+    # 抽出したIDを初期値としてセット
+    target_id = st.text_input("対象ID", value=clicked_id, placeholder="ピンをタップで自動入力")
 with col2:
-    new_status = st.selectbox("新しいステータス", options=status_options)
+    new_status = st.selectbox("新しいステータス", options=status_options, index=default_status_idx)
 with col3:
-    new_condition = st.selectbox("ポスター状況", options=all_conditions_for_input)
+    new_condition = st.selectbox("ポスター状況", options=all_conditions_for_input, index=default_cond_idx)
 with col4:
     st.markdown("<br>", unsafe_allow_html=True)
     if st.button("データベースを更新", type="primary"):
@@ -198,6 +223,7 @@ with col4:
                 
                 if len(response.data) > 0:
                     st.success(f"🎉 ID: {target_id} を「{new_status} / {new_condition}」に更新しました！")
+                    # 地図をリセットして再描画
                     st.rerun()
                 else:
                     st.error(f"⚠️ ID: {target_id} が見つかりませんでした。")
