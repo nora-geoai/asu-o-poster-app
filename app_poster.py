@@ -156,9 +156,15 @@ else:
     center_lat = 35.0045
     center_lon = 135.9685
 
+# 💡 ここから差し替え・追加します
+from folium.plugins import LocateControl  # ← 一番上ではなく、ここでインポートしても動きます！
+
 m = folium.Map(location=[center_lat, center_lon], zoom_start=12, tiles=None)
 
+# レイヤ1：通常の地図
 folium.TileLayer('openstreetmap', name='通常地図').add_to(m)
+
+# レイヤ2：航空写真
 folium.TileLayer(
     tiles='https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg',
     attr='国土地理院',
@@ -166,6 +172,15 @@ folium.TileLayer(
     overlay=False,
     control=True
 ).add_to(m)
+
+# 🚀 【新機能】現在地表示・追従ボタンを追加！
+LocateControl(
+    auto_start=False,             # アプリ起動時にいきなり現在地へ飛ばないようにする（現場で押す）
+    fly_to=True,                  # ボタンを押したとき、現在地へスムーズにアニメーション移動
+    keep_current_zoom_level=True, # 移動したときに、今の拡大率（ズーム）を維持する
+    strings={"title": "現在地を表示", "popup": "あなたの現在位置"}
+).add_to(m)
+# 💡 ここまでを追加・差し替え
 
 color_map = {"承諾": "blue", "交渉中": "orange", "お断り": "red", "未交渉": "gray"}
 
