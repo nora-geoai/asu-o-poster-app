@@ -1,5 +1,5 @@
 """
-ポスター現地調査専用アプリ（タップ連動・選択肢固定版）
+ポスター現地調査専用アプリ（区分フィルター＆更新対応版）
 Streamlit + Folium + Supabase
 """
 
@@ -72,8 +72,19 @@ def fetch_poster_data():
         df['longitude'] = pd.to_numeric(df['longitude'], errors='coerce')
         df = df.dropna(subset=['latitude', 'longitude'])
         
+        # ポスター状況のクレンジング
         df['poster_condition'] = df['poster_condition'].fillna('未記録').astype(str).str.strip()
         df['poster_condition'] = df['poster_condition'].replace('', '未記録')
+        df['poster_condition'] = df['poster_condition'].replace('nan', '未記録')
+
+        # 【追加】区分のクレンジング
+        if 'kubun' not in df.columns:
+            df['kubun'] = '未記録'
+        else:
+            df['kubun'] = df['kubun'].fillna('未記録').astype(str).str.strip()
+            df['kubun'] = df['kubun'].replace('', '未記録')
+            df['kubun'] = df['kubun'].replace('nan', '未記録')
+
         df = df.sort_values(by='poster_id')
     return df
 
@@ -88,19 +99,25 @@ if df_posters.empty:
     st.stop()
 
 # ============================================================
-# 【修正】選択肢のリストをここで完全に固定化する
+# 選択肢の固定化
 # ============================================================
-# 基本の5項目を絶対に表示する
-condition_presets = ["良好", "色あせ", "破れ", "要貼り替え", "未記録"]
+status_options = ["承諾", "交渉中", "お断り", "未交渉"]
 
-# データベースに独自の状況が書き込まれていれば、それも追加してリスト化する
+# ポスター状況
+condition_presets = ["良好", "色あせ", "破れ", "要貼り替え", "未記録"]
 db_conditions = df_posters['poster_condition'].unique().tolist()
 all_conditions = condition_presets.copy()
 for c in db_conditions:
     if c not in all_conditions:
         all_conditions.append(c)
 
-status_options = ["承諾", "交渉中", "お断り", "未交渉"]
+# 【追加】区分
+kubun_presets = ["済", "未", "別途", "未記録"]
+db_kubuns = df_posters['kubun'].unique().tolist()
+all_kubuns = kubun_presets.copy()
+for k in db_kubuns:
+    if k not in all_kubuns:
+        all_kubuns.append(k)
 
 # ============================================================
 # サイドバー：フィルタリング設定
@@ -111,12 +128,16 @@ selected_cities = st.sidebar.multiselect("市町村を選択", options=all_citie
 
 selected_status = st.sidebar.multiselect("表示するステータス", options=status_options, default=["承諾", "交渉中", "未交渉"])
 
-# 修正したall_conditionsを適用
+# 【追加】区分の絞り込み
+selected_kubuns = st.sidebar.multiselect("区分を選択", options=all_kubuns, default=all_kubuns)
+
 selected_conditions = st.sidebar.multiselect("ポスター状況を選択", options=all_conditions, default=all_conditions)
 
+# フィルタ適用（区分も追加）
 df_filtered = df_posters[
     (df_posters['city'].isin(selected_cities)) & 
     (df_posters['status'].isin(selected_status)) &
+    (df_posters['kubun'].isin(selected_kubuns)) &
     (df_posters['poster_condition'].isin(selected_conditions))
 ]
 st.sidebar.markdown("---")
@@ -126,7 +147,7 @@ if st.sidebar.button("ログアウト", type="secondary"):
     st.rerun()
 
 # ============================================================
-# 地図の描画 (Folium + レイヤ切り替え)
+# 地図の描画 (Folium)
 # ============================================================
 if not df_filtered.empty:
     center_lat = df_filtered['latitude'].mean()
@@ -138,7 +159,6 @@ else:
 m = folium.Map(location=[center_lat, center_lon], zoom_start=12, tiles=None)
 
 folium.TileLayer('openstreetmap', name='通常地図').add_to(m)
-
 folium.TileLayer(
     tiles='https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg',
     attr='国土地理院',
@@ -155,16 +175,17 @@ for _, row in df_filtered.iterrows():
         <b style='font-size: 14px; color: #1a472a;'>ID: {row['poster_id']}</b><br>
         <hr style='margin: 4px 0; border: 0; border-top: 1px solid #ccc;'>
         <b>現状:</b> <span style='color: {color_map.get(row['status'], 'black')}; font-weight: bold;'>{row['status']}</span><br>
+        <b>区分:</b> <b>{row.get('kubun', '未記録')}</b><br>
         <b>住所:</b> {row.get('address_confirmed', 'なし')}<br>
         <b>情報:</b> {row.get('info', 'なし')}<br>
-        <b>状況:</b> <b>{row.get('poster_condition', '未記録')}</b><br>
+        <b>状況:</b> {row.get('poster_condition', '未記録')}<br>
         <b>種類:</b> {row.get('poster_type', 'なし')}
     </div>
     """
     folium.Marker(
         location=[row['latitude'], row['longitude']],
         popup=folium.Popup(popup_html, max_width=300),
-        tooltip=f"ID: {row['poster_id']} ({row['status']}) - {row['poster_condition']}",
+        tooltip=f"ID: {row['poster_id']} ({row['status']})",
         icon=folium.Icon(color=color_map.get(row['status'], 'gray'), icon="info-sign")
     ).add_to(m)
 
@@ -181,6 +202,7 @@ st.caption("地図上のピンをタップすると、そのIDと現在の状況
 
 clicked_id = ""
 default_status_idx = 0
+default_kubun_idx = all_kubuns.index("未記録")
 default_cond_idx = all_conditions.index("未記録")
 
 if map_data and map_data.get("last_object_clicked_tooltip"):
@@ -192,39 +214,46 @@ if map_data and map_data.get("last_object_clicked_tooltip"):
         matched_row = df_posters[df_posters['poster_id'] == clicked_id]
         if not matched_row.empty:
             current_status = matched_row.iloc[0]['status']
+            current_kubun = matched_row.iloc[0]['kubun']
             current_cond = matched_row.iloc[0]['poster_condition']
             
             if current_status in status_options:
                 default_status_idx = status_options.index(current_status)
+            if current_kubun in all_kubuns:
+                default_kubun_idx = all_kubuns.index(current_kubun)
             if current_cond in all_conditions:
                 default_cond_idx = all_conditions.index(current_cond)
 
-col1, col2, col3, col4 = st.columns([1.2, 1, 1, 1])
+# フォームを5列に拡張して「区分」を追加
+col1, col2, col3, col4, col5 = st.columns([1.2, 1, 1, 1, 1.2])
 
 with col1:
     target_id = st.text_input("対象ID", value=clicked_id, placeholder="ピンをタップで自動入力")
 with col2:
-    new_status = st.selectbox("新しいステータス", options=status_options, index=default_status_idx)
+    new_status = st.selectbox("ステータス", options=status_options, index=default_status_idx)
 with col3:
-    # 修正したall_conditionsを適用
-    new_condition = st.selectbox("ポスター状況", options=all_conditions, index=default_cond_idx)
+    new_kubun = st.selectbox("区分", options=all_kubuns, index=default_kubun_idx)
 with col4:
+    new_condition = st.selectbox("ポスター状況", options=all_conditions, index=default_cond_idx)
+with col5:
     st.markdown("<br>", unsafe_allow_html=True)
     if st.button("データベースを更新", type="primary"):
         if not target_id:
             st.error("ポスターIDを入力してください。")
         else:
             try:
+                # 【修正】区分も一緒にデータベースにアップデートする
                 response = supabase.table("tbl_poster_management") \
                     .update({
                         "status": new_status,
+                        "kubun": new_kubun if new_kubun != "未記録" else "",
                         "poster_condition": new_condition if new_condition != "未記録" else ""
                     }) \
                     .eq("poster_id", target_id.strip()) \
                     .execute()
                 
                 if len(response.data) > 0:
-                    st.success(f"🎉 ID: {target_id} を「{new_status} / {new_condition}」に更新しました！")
+                    st.success(f"🎉 ID:{target_id} を「{new_status} / 区分:{new_kubun} / 状況:{new_condition}」に更新！")
                     st.rerun()
                 else:
                     st.error(f"⚠️ ID: {target_id} が見つかりませんでした。")
@@ -236,5 +265,9 @@ with col4:
 # ============================================================
 st.markdown("<br>", unsafe_allow_html=True)
 with st.expander("📊 絞り込みデータの一覧表を確認（全11項目対応）"):
-    display_cols = ['poster_id', 'city', 'status', 'address_confirmed', 'info', 'poster_condition', 'poster_type', 'fetch_status']
-    st.dataframe(df_filtered[display_cols], use_container_width=True, hide_index=True)
+    # テーブルの表示列にも 'kubun' を追加
+    display_cols = ['poster_id', 'city', 'status', 'kubun', 'address_confirmed', 'info', 'poster_condition', 'poster_type']
+    
+    # 存在する列だけを表示（fetch_status等は無い場合があるため安全に処理）
+    available_cols = [col for col in display_cols if col in df_filtered.columns]
+    st.dataframe(df_filtered[available_cols], use_container_width=True, hide_index=True)
