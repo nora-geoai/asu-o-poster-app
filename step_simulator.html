@@ -1,0 +1,94 @@
+
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>NORA グラフデータベース・ステップシミュレーター</title>
+    <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+    <style type="text/css">
+        body { background-color: #222222; color: white; font-family: sans-serif; margin: 0; padding: 20px; }
+        #mynetwork { width: 100%; height: 600px; border: 1px solid #444444; background-color: #1a1a1a; margin-top: 10px; }
+        .control-panel { display: flex; align-items: center; gap: 20px; margin-bottom: 10px; }
+        button { padding: 10px 20px; font-size: 16px; cursor: pointer; background-color: #3498db; color: white; border: none; border-radius: 5px; font-weight: bold; }
+        button:hover { background-color: #2980b9; }
+        button:disabled { background-color: #555555; cursor: not-allowed; }
+        #status { font-size: 18px; font-weight: bold; color: #f1c40f; }
+    </style>
+</head>
+<body>
+
+    <h2>🌱 グラフデータベース状態遷移シミュレーター</h2>
+    <div class="control-panel">
+        <button id="nextBtn" onclick="nextStep()">次へ進む ▶︎</button>
+        <div id="status">ステップ1: ノード、エッジが未登録（空のデータベース）</div>
+    </div>
+
+    <div id="mynetwork"></div>
+
+    <script type="text/javascript">
+        // 1. 空のデータセットを作成
+        var nodes = new vis.DataSet([]);
+        var edges = new vis.DataSet([]);
+
+        // 2. ネットワークの初期設定
+        var container = document.getElementById('mynetwork');
+        var data = { nodes: nodes, edges: edges };
+        var options = {
+            nodes: { shape: 'dot', size: 25, font: { color: 'white', size: 16 } },
+            edges: { font: { color: '#cccccc', align: 'middle' }, arrows: 'to', width: 2 },
+            groups: {
+                Person: { color: { background: '#3498db', border: '#2980b9' } },
+                Farm: { color: { background: '#2ecc71', border: '#27ae60' } }
+            },
+            physics: { barnesHut: { gravitationalConstant: -10000 } }
+        };
+        var network = new vis.Network(container, data, options);
+
+        // 3. ステップ管理のロジック
+        var currentStep = 1;
+
+        function nextStep() {
+            currentStep++;
+
+            if (currentStep === 2) {
+                // 【ステップ2】ノードの登録
+                nodes.add([
+                    { id: 'p1', label: '上野', group: 'Person', title: 'GISエンジニア' },
+                    { id: 'p2', label: '本永', group: 'Person', title: 'データ連携専門家' },
+                    { id: 'f1', label: '明日を農園', group: 'Farm', title: '稼働中' },
+                    { id: 'f2', label: '山間部の遊休農地', group: 'Farm', title: '耕作放棄' }
+                ]);
+                document.getElementById('status').innerText = "ステップ2: ノードが登録された状態（点は存在しますが、関係性がありません）";
+            
+            } else if (currentStep === 3) {
+                // 【ステップ3】エッジの登録
+                edges.add([
+                    { id: 'e1', from: 'p1', to: 'f1', label: '管理する' },
+                    { id: 'e2', from: 'p2', to: 'f2', label: '調査する' }
+                ]);
+                document.getElementById('status').innerText = "ステップ3: エッジが登録された状態（点と点が結ばれ、意味を持ちました）";
+            
+            } else if (currentStep === 4) {
+                // 【ステップ4】データの追加とエッジの更新
+                // 新しいノードとエッジを追加
+                nodes.add([
+                    { id: 'p3', label: '金澤', group: 'Person', title: 'JSON-LD設計' }
+                ]);
+                edges.add([
+                    { id: 'e3', from: 'p3', to: 'f1', label: '技術支援する' },
+                    { id: 'e4', from: 'p1', to: 'p2', label: '連携する' }
+                ]);
+                // 既存のエッジ(e1)のプロパティを更新
+                edges.update({ id: 'e1', label: '管理・所有する (更新済)', color: { color: '#e74c3c' }, width: 4 });
+                
+                document.getElementById('status').innerText = "ステップ4: エッジが更新された状態（赤線：関係性の変化を即座に反映）";
+                
+                // ボタンを無効化
+                var btn = document.getElementById('nextBtn');
+                btn.innerText = "完了";
+                btn.disabled = true;
+            }
+        }
+    </script>
+</body>
+</html>
