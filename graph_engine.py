@@ -108,3 +108,55 @@ def ask_ai(G, prompt):
 print("\n✅ 3. AI検索テスト（プロンプト入力）")
 ask_ai(G, "山間部の遊休農地を調査しているのは誰ですか？")
 ask_ai(G, "明日を農園に関わっているメンバーを教えて。")
+
+from pyvis.network import Network
+import os
+
+# =========================================================
+# 4. 可視化機能（画面でグリグリ動かす）の追加
+# =========================================================
+def visualize_graph(G, output_filename="graph_engine_visual.html"):
+    print(f"\n🎨 グラフをブラウザ用に描画しています...")
+    
+    # キャンバスの設定（背景色などを指定）
+    net = Network(height="700px", width="100%", directed=True, bgcolor="#222222", font_color="white")
+    
+    # NetworkXのグラフデータから、Pyvis用のノードを作成
+    for node_id, node_data in G.nodes(data=True):
+        node_type = node_data.get("type", "Unknown")
+        name = node_data.get("name", node_id)
+        
+        # ノードのタイプ（人か農地か）によって色とポップアップ情報を自動で変える
+        if node_type == "Person":
+            color = "#3498db" # 人は青色
+            title = f"ID: {node_id}\nタイプ: {node_type}\n役割: {node_data.get('role', 'なし')}"
+        elif node_type == "Farm":
+            color = "#2ecc71" # 農地は緑色
+            title = f"ID: {node_id}\nタイプ: {node_type}\n状況: {node_data.get('status', '不明')}"
+        else:
+            color = "#95a5a6" # その他はグレー
+            title = ""
+            
+        net.add_node(node_id, label=name, title=title, color=color)
+        
+    # NetworkXのグラフデータから、Pyvis用のエッジ（関係性の線）を作成
+    for source, target, edge_data in G.edges(data=True):
+        net.add_edge(source, target, title=edge_data.get("label", ""), label=edge_data.get("label", ""))
+        
+    # ノードが反発しあって綺麗に広がる物理演算の設定
+    net.set_options("""
+    var options = {
+      "physics": {
+        "barnesHut": {
+          "gravitationalConstant": -15000
+        }
+      }
+    }
+    """)
+    
+    # HTMLファイルとして出力
+    net.save_graph(output_filename)
+    print(f"✅ 可視化完了！MacのFinderから {output_filename} を開いてください。")
+
+# 作成した可視化関数を実行
+visualize_graph(G)
