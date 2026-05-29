@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>NORA Graph Database - Editor & Viewer</title>
+    <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 0; display: flex; height: 100vh; background-color: #1e1e1e; color: #d4d4d4; }
+        
+        /* エディタ部分（左サイドバー） */
+        #editor-panel { width: 350px; background-color: #252526; padding: 20px; box-shadow: 2px 0 5px rgba(0,0,0,0.5); overflow-y: auto; z-index: 10; }
+        h2, h3 { color: #ffffff; margin-top: 0; font-weight: normal; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-size: 0.9em; color: #cccccc; }
+        input[type="text"], select { width: 100%; padding: 8px; box-sizing: border-box; background-color: #3c3c3c; border: 1px solid #555; color: white; border-radius: 4px; }
+        button { width: 100%; padding: 10px; background-color: #0e639c; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; margin-bottom: 10px; }
+        button:hover { background-color: #1177bb; }
+        button.danger { background-color: #c0392b; }
+        button.danger:hover { background-color: #e74c3c; }
+        hr { border: 0; border-top: 1px solid #444; margin: 20px 0; }
+        
+        /* ビュアー部分（右メイン画面） */
+        #viewer-panel { flex-grow: 1; position: relative; }
+        #mynetwork { width: 100%; height: 100%; }
+        #info-box { position: absolute; top: 20px; right: 20px; background-color: rgba(37, 37, 38, 0.9); padding: 15px; border-radius: 5px; border: 1px solid #555; min-width: 200px; display: none; }
+    </style>
+</head>
+<body>
+
+    <div id="editor-panel">
+        <h2>🛠️ Graph Editor</h2>
+        
+        <h3>ノード（点）を追加</h3>
+        <div class="form-group">
+            <label>ID (英数字):</label>
+            <input type="text" id="nodeId" placeholder="例: p3">
+        </div>
+        <div class="form-group">
+            <label>名前（表示名）:</label>
+            <input type="text" id="nodeLabel" placeholder="例: 金澤">
+        </div>
+        <div class="form-group">
+            <label>タイプ（グループ）:</label>
+            <select id="nodeGroup">
+                <option value="Person">Person（人）</option>
+                <option value="Farm">Farm（農地）</option>
+                <option value="Project">Project（プロジェクト）</option>
+            </select>
+        </div>
+        <button onclick="addNode()">＋ ノードを追加 / 更新</button>
+
+        <hr>
+
+        <h3>エッジ（線）を追加</h3>
+        <div class="form-group">
+            <label>From (元ノードID):</label>
+            <input type="text" id="edgeFrom" placeholder="例: p3">
+        </div>
+        <div class="form-group">
+            <label>To (先ノードID):</label>
+            <input type="text" id="edgeTo" placeholder="例: f1">
+        </div>
+        <div class="form-group">
+            <label>関係性（ラベル）:</label>
+            <input type="text" id="edgeLabel" placeholder="例: 技術支援する">
+        </div>
+        <button onclick="addEdge()">🔗 エッジを追加 / 更新</button>
+
+        <hr>
+
+        <h3>選択アイテムの削除</h3>
+        <p style="font-size: 0.8em; color: #aaa;">※右の画面でノードかエッジをクリックして選択</p>
+        <button class="danger" onclick="deleteSelected()">🗑️ 選択したものを削除</button>
+    </div>
+
+    <div id="viewer-panel">
+        <div id="mynetwork"></div>
+        <div id="info-box">
+            <h3 style="margin-top:0;">📋 選択情報</h3>
+            <div id="info-content"></div>
+        </div>
+    </div>
+
+    <script type="text/javascript">
+        // 初期データ
+        var nodes = new vis.DataSet([
+            { id: 'p1', label: '上野', group: 'Person' },
+            { id: 'p2', label: '本永', group: 'Person' },
+            { id: 'f1', label: '明日を農園', group: 'Farm' }
+        ]);
+
+        var edges = new vis.DataSet([
+            { id: 'e1', from: 'p1', to: 'f1', label: '管理する' }
+        ]);
+
+        var container = document.getElementById('mynetwork');
+        var data = { nodes: nodes, edges: edges };
+        var options = {
+            nodes: { shape: 'dot', size: 25, font: { color: '#ffffff', size: 16 } },
+            edges: { font: { color: '#cccccc', align: 'middle', size: 12 }, arrows: 'to', width: 2, smooth: { type: 'continuous' } },
+            groups: {
+                Person: { color: { background: '#0e639c', border: '#1177bb' } },
+                Farm: { color: { background: '#2ecc71', border: '#27ae60' } },
+                Project: { color: { background: '#e67e22', border: '#d35400' } }
+            },
+            interaction: { hover: true, selectConnectedEdges: false },
+            physics: { barnesHut: { gravitationalConstant: -5000, centralGravity: 0.3 } }
+        };
+
+        var network = new vis.Network(container, data, options);
+
+        // --- エディタ機能のロジック ---
+
+        function addNode() {
+            var id = document.getElementById('nodeId').value;
+            var label = document.getElementById('nodeLabel').value;
+            var group = document.getElementById('nodeGroup').value;
+            if (!id || !label) return alert("IDと名前を入力してください。");
+            
+            try {
+                nodes.update({ id: id, label: label, group: group });
+                document.getElementById('nodeId').value = '';
+                document.getElementById('nodeLabel').value = '';
+            } catch (err) { alert(err); }
+        }
+
+        function addEdge() {
+            var from = document.getElementById('edgeFrom').value;
+            var to = document.getElementById('edgeTo').value;
+            var label = document.getElementById('edgeLabel').value;
+            if (!from || !to || !label) return alert("From, To, 関係性を入力してください。");
+            
+            // IDの自動生成（簡易的）
+            var edgeId = from + '-' + to;
+            try {
+                edges.update({ id: edgeId, from: from, to: to, label: label });
+                document.getElementById('edgeLabel').value = '';
+            } catch (err) { alert(err); }
+        }
+
+        function deleteSelected() {
+            var selectedNodes = network.getSelectedNodes();
+            var selectedEdges = network.getSelectedEdges();
+            if (selectedNodes.length > 0) nodes.remove(selectedNodes);
+            if (selectedEdges.length > 0) edges.remove(selectedEdges);
+            document.getElementById('info-box').style.display = 'none';
+        }
+
+        // --- ビュアー連携（クリック時の情報表示） ---
+        network.on("select", function (params) {
+            var infoBox = document.getElementById('info-box');
+            var infoContent = document.getElementById('info-content');
+            
+            if (params.nodes.length > 0) {
+                var node = nodes.get(params.nodes[0]);
+                infoContent.innerHTML = `<strong>ID:</strong> ${node.id}<br><strong>名前:</strong> ${node.label}<br><strong>タイプ:</strong> ${node.group}`;
+                infoBox.style.display = 'block';
+            } else if (params.edges.length > 0) {
+                var edge = edges.get(params.edges[0]);
+                infoContent.innerHTML = `<strong>元:</strong> ${edge.from}<br><strong>先:</strong> ${edge.to}<br><strong>関係:</strong> ${edge.label}`;
+                infoBox.style.display = 'block';
+            } else {
+                infoBox.style.display = 'none';
+            }
+        });
+    </script>
+</body>
+</html>
