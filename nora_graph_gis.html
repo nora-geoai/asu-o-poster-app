@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>NORA Graph & GIS Integration</title>
+    
+    <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 0; display: flex; height: 100vh; background-color: #1e1e1e; color: #d4d4d4; }
+        
+        /* 左: 情報パネル */
+        #info-panel { width: 250px; background-color: #252526; padding: 20px; box-shadow: 2px 0 5px rgba(0,0,0,0.5); z-index: 10; display: flex; flex-direction: column; }
+        h2, h3 { color: #ffffff; margin-top: 0; font-weight: normal; font-size: 1.1em; }
+        .data-box { background-color: #1e1e1e; padding: 10px; border-radius: 5px; border: 1px solid #444; margin-bottom: 15px; font-size: 0.9em; min-height: 100px; }
+        button { padding: 10px; background-color: #0e639c; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
+        button:hover { background-color: #1177bb; }
+        
+        /* 中央: グラフビュアー */
+        #graph-panel { flex: 1; border-right: 2px solid #444; position: relative; }
+        #mynetwork { width: 100%; height: 100%; }
+        .panel-label { position: absolute; top: 10px; left: 10px; z-index: 1000; background: rgba(30,30,30,0.8); padding: 5px 10px; border-radius: 4px; border: 1px solid #555; font-weight: bold; }
+
+        /* 右: GIS（地図）ビュアー */
+        #map-panel { flex: 1; position: relative; }
+        #map { width: 100%; height: 100%; background-color: #242424; }
+    </style>
+</head>
+<body>
+
+    <div id="info-panel">
+        <h2 style="font-size: 1.3em;">🌐 NORA Digital Twin</h2>
+        <p style="font-size: 0.8em; color: #aaa;">グラフまたは地図をクリックして連動を確認してください。</p>
+        
+        <h3>📋 選択データ詳細</h3>
+        <div id="info-content" class="data-box">
+            未選択
+        </div>
+        
+        <button onclick="resetView()">全体表示にリセット</button>
+    </div>
+
+    <div id="graph-panel">
+        <div class="panel-label">🕸️ セマンティック・グラフ (vis.js)</div>
+        <div id="mynetwork"></div>
+    </div>
+
+    <div id="map-panel">
+        <div class="panel-label" style="z-index: 400;">🗺️ GIS空間データ (Leaflet)</div>
+        <div id="map"></div>
+    </div>
+
+    <script>
+        // ==========================================
+        // [1] グラフデータ (ノードとエッジ)
+        // ==========================================
+        var nodes = new vis.DataSet([
+            { id: 'p1', label: '上野', group: 'Person', info: 'GISスペシャリスト' },
+            { id: 'p2', label: '本永', group: 'Person', info: 'データ連携支援' },
+            { id: 'f1', label: '明日を農園 (東区画)', group: 'Farm', info: '面積: 1500㎡ / 作物: 米' },
+            { id: 'f2', label: '明日を農園 (西区画)', group: 'Farm', info: '面積: 1200㎡ / 作物: 大豆' }
+        ]);
+        var edges = new vis.DataSet([
+            { from: 'p1', to: 'f1', label: '管理する' },
+            { from: 'p1', to: 'f2', label: '管理する' },
+            { from: 'p2', to: 'f1', label: '調査する' },
+            { from: 'f1', to: 'f2', label: '隣接する', dashes: true }
+        ]);
+
+        var container = document.getElementById('mynetwork');
+        var graphData = { nodes: nodes, edges: edges };
+        var options = {
+            nodes: { shape: 'dot', size: 20, font: { color: '#ffffff', size: 14 } },
+            edges: { font: { color: '#cccccc', align: 'middle', size: 11 }, arrows: 'to', width: 2 },
+            groups: {
+                Person: { color: { background: '#0e639c', border: '#1177bb' } },
+                Farm: { color: { background: '#2ecc71', border: '#27ae60' } }
+            },
+            interaction: { hover: true },
+            physics: { barnesHut: { gravitationalConstant: -3000 } }
+        };
+        var network = new vis.Network(container, graphData, options);
+
+        // ==========================================
+        // [2] GISデータ (GeoJSON) と 地図初期化
+        // ==========================================
+        // 琵琶湖の南、大津周辺の座標をベースにしたダミーポリゴン
+        var geojsonData = [
+            {
+                "type": "Feature",
+                "properties": { "id": "f1", "name": "明日を農園 (東区画)" },
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [[[135.868, 35.004], [135.869, 35.004], [135.869, 35.005], [135.868, 35.005], [135.868, 35.004]]]
+                }
+            },
+            {
+                "type": "Feature",
+                "properties": { "id": "f2", "name": "明日を農園 (西区画)" },
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [[[135.869, 35.004], [135.870, 35.004], [135.870, 35.005], [135.869, 35.005], [135.869, 35.004]]]
+                }
+            }
+        ];
+
+        // 地図の作成（OpenStreetMapのタイルを使用）
+        var map = L.map('map').setView([35.0045, 135.869], 16);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors',
+            className: 'map-tiles' // ダークモード風にするためのハックは今回は省略
+        }).addTo(map);
+
+        // ノードIDと地図上のレイヤー（ポリゴン）を結びつける辞書
+        var layerMap = {};
+
+        // GeoJSONを地図に描画
+        var geoJsonLayer = L.geoJSON(geojsonData, {
+            style: function (feature) {
+                return { color: "#2ecc71", weight: 2, fillOpacity: 0.4 };
+            },
+            onEachFeature: function (feature, layer) {
+                // ポップアップの設定
+                layer.bindPopup("<b>" + feature.properties.name + "</b>");
+                // 辞書に登録
+                layerMap[feature.properties.id] = layer;
+
+                // 🌍 地図のポリゴンをクリックした時のイベント
+                layer.on('click', function() {
+                    var nodeId = feature.properties.id;
+                    
+                    // 1. グラフを該当ノードにフォーカス
+                    network.selectNodes([nodeId]);
+                    network.focus(nodeId, { scale: 1.2, animation: true });
+                    
+                    // 2. 左パネルの情報を更新
+                    updateInfoPanel(nodeId);
+                });
+            }
+        }).addTo(map);
+
+        // ==========================================
+        // [3] 双方向の連動ロジック
+        // ==========================================
+        
+        // 🕸️ グラフのノードをクリックした時のイベント
+        network.on("selectNode", function (params) {
+            var nodeId = params.nodes[0];
+            updateInfoPanel(nodeId);
+            
+            // 地図上に該当するポリゴン（Farm）があればズームする
+            if (layerMap[nodeId]) {
+                var layer = layerMap[nodeId];
+                map.flyToBounds(layer.getBounds(), { padding: [50, 50], duration: 0.5 });
+                layer.openPopup();
+            }
+        });
+
+        // 情報パネルの更新関数
+        function updateInfoPanel(nodeId) {
+            var node = nodes.get(nodeId);
+            var content = document.getElementById('info-content');
+            if(node) {
+                content.innerHTML = `
+                    <strong style="color:#61afef;">[${node.group}]</strong><br>
+                    <strong>ID:</strong> ${node.id}<br>
+                    <strong>名前:</strong> ${node.label}<br>
+                    <hr style="border:0; border-top:1px solid #444; margin:8px 0;">
+                    ${node.info || '追加情報なし'}
+                `;
+            }
+        }
+
+        // 全体表示リセット関数
+        function resetView() {
+            network.fit({ animation: true });
+            map.flyToBounds(geoJsonLayer.getBounds(), { padding: [50, 50], duration: 0.5 });
+            network.unselectAll();
+            document.getElementById('info-content').innerHTML = "未選択";
+            map.closePopup();
+        }
+    </script>
+</body>
+</html>
